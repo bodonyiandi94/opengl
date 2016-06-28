@@ -3,19 +3,24 @@
 /** A uniform puffer indexek. */
 #define UNIFORM_BUFFER_CAMERA 0
 #define UNIFORM_BUFFER_LIGHT  1
+#define UNIFORM_BUFFER_OBJECT 2
 
 /** Kamera uniform pufferei. */
 layout (std140, binding = UNIFORM_BUFFER_CAMERA) uniform CameraData
 {
-    mat4 mModel;
     mat4 mView;
     mat4 mProjection;
-    mat4 mNormal;
     vec3 vEye;
     vec3 vRight;
     vec3 vForward;
     vec3 vUp;
 } sCameraData;
+
+layout (std140, binding = UNIFORM_BUFFER_OBJECT) uniform ObjectData
+{
+    mat4 mModel;
+    mat4 mNormal;
+} sObjectData;
 
 /** Egy irányított fényforráshoz tartozó adatok. */
 struct DirectionalLightData
@@ -77,7 +82,7 @@ vec3 calcPointLight(PointLightData lightData, vec3 vPosWS, vec3 vNormalWS)
     toLight = toLight / dist;
     
     /** A kamerába mutató vektort. */
-    vec3 toEye = normalize(sCameraData.vEye - lightData.vLightPosWS.xyz);
+    vec3 toEye = normalize(sCameraData.vEye - vPosWS.xyz);
     
     /** A fényfelé mutató vektor tükrözöttje a normáltra. */
     vec3 reflected = normalize(reflect(-toLight, vNormalWS));

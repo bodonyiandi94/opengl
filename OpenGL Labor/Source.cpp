@@ -65,13 +65,30 @@ static GLfloat s_yaw = 0.0f;
 //                     UNIFORM PUFFEREK
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static GLuint s_uboCamera, s_uboLight;
+static GLuint s_uboCamera, s_uboLight, s_uboObject;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                     SHADEREK
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static GLuint s_program = 0, s_programComposite = 0;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//                     SKYBOX
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static GLuint s_programSkybox = 0;
+static GLuint s_textureSkybox = 0;
+
+static std::string skyboxImages[] = 
+{
+	"right.jpg",
+	"left.jpg",
+	"top.jpg",
+	"bottom.jpg",
+	"back.jpg",
+	"front.jpg" 
+};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                     
@@ -125,15 +142,19 @@ static Mesh s_sponza;
 
 struct CameraData
 {
-	glm::mat4 m_model;
 	glm::mat4 m_view;
 	glm::mat4 m_projection;
-	glm::mat4 m_normal;
 	glm::vec4 m_eye = glm::vec4(0.0f, 0.0f, 2.0f, 0.0f);
 	glm::vec4 m_right = glm::vec4(0.0f);
 	glm::vec4 m_forward = glm::vec4(0.0f);
 	glm::vec4 m_up = glm::vec4(0.0f);
 } s_cameraData;
+
+struct ObjectData
+{
+	glm::mat4 m_model;
+	glm::mat4 m_normal;
+}s_skyboxData, s_sponzaData;
 
 struct DirectionalLightData
 {
@@ -366,6 +387,39 @@ bool loadTexture(GLuint& texture, const std::string& fileName)
 	return true;
 }
 
+bool loadCubeMap(GLuint& texture, std::string* skyboxImages)
+{
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, texture);
+
+	for (int i = 0; i < 6; ++i)
+	{
+		auto fileName = "Skybox\\" + skyboxImages[i];
+
+		int x, y, n;
+		auto image = stbi_load(fileName.c_str(), &x, &y, &n, 4);
+
+		if (image == NULL)
+		{
+			std::cout << "Error loading texture: " << fileName << std::endl;
+			return false;
+		}
+
+		glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA8, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+
+		stbi_image_free(image);
+	}
+
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+
+	return true;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                     MESH BETÖLTÉS
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -528,9 +582,9 @@ void initLightSources()
 	s_directionalLight.m_lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
     
     /** Pontszerû fényforrás helye, sugara, színe és csillapodásai. */
-	s_pointLight.m_center = glm::vec4(0.0f, 750.0f, 0.0f, 0.0f);
+	s_pointLight.m_center = glm::vec4(0.0f, 2000.0f, 0.0f, 0.0f);
 	s_pointLight.m_lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
-	s_pointLight.m_radius = 2000.0f;
+	s_pointLight.m_radius = 4000.0f;
 }
 
 void initMatrices()
@@ -549,12 +603,14 @@ void initMatrices()
 	s_cameraData.m_up = rotation * UP;
 
     /** Konstruáljuk meg az MVP (model-view-projection) mátrixokat. */
-	//s_cameraData.m_model = glm::rotate(glm::radians(-45.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-	s_cameraData.m_model = glm::scale(glm::vec3(0.8f));
 	s_cameraData.m_view = glm::lookAt(glm::vec3(s_cameraData.m_eye), glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward), glm::vec3(0.0f, 1.0f, 0.0f));
 	s_cameraData.m_projection = glm::perspective(glm::radians(65.0f), GLfloat(s_width)/GLfloat(s_height), 0.1f, 10000.0f);
-	
-	s_cameraData.m_normal = glm::inverseTranspose(s_cameraData.m_model);
+
+	s_skyboxData.m_model = glm::scale(glm::vec3(5000.0f));
+	s_skyboxData.m_normal = glm::inverseTranspose(s_skyboxData.m_model);
+
+	s_sponzaData.m_model = glm::scale(glm::vec3(2.0f));
+	s_sponzaData.m_normal = glm::inverseTranspose(s_sponzaData.m_model);
 }
 
 void initGeometry()
@@ -583,6 +639,7 @@ void initBuffers()
 	/** Hozzuk létre a uniform puffereket. */
 	glGenBuffers(1, &s_uboLight);
 	glGenBuffers(1, &s_uboCamera);
+	glGenBuffers(1, &s_uboObject);
 
 	/** Hozzuk létre a szükséges VAO és VBO-kat. */
 	glGenBuffers(1, &s_vboVertex);
@@ -733,10 +790,15 @@ void initShaders()
 {
 	s_program = loadProgram("first");
 	s_programComposite = loadProgram("composite");
+	s_programSkybox = loadProgram("skybox");
 }
 
 void initScene()
 {
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
+	loadCubeMap(s_textureSkybox, skyboxImages);
+
 	loadMesh(s_sponza, "Sponza", "sponza.obj");
 
 	initLightSources();
@@ -763,11 +825,13 @@ void cleanUpScene()
     /** Töröljük a shader programot. */
     glDeleteProgram(s_program);
     glDeleteProgram(s_programComposite);
+	glDeleteProgram(s_programSkybox);
 
     /** Töröljük a framebuffert és a hozzá tarotó textúrákat. */
 	glDeleteFramebuffers(1, &s_fbo);
 	glDeleteTextures(1, &s_textureColor);
 	glDeleteTextures(1, &s_textureDepth);
+	glDeleteTextures(1, &s_textureSkybox);
 
     /** Töröljük a VAO és VBO-kat. */
 	glDeleteVertexArrays(1, &s_vao);
@@ -784,6 +848,7 @@ void cleanUpScene()
     /** Töröljük a uniform puffereket. */
 	glDeleteBuffers(1, &s_uboLight);
 	glDeleteBuffers(1, &s_uboCamera);
+	glDeleteBuffers(1, &s_uboObject);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -809,32 +874,46 @@ void uploadLightUniforms()
 	glBindBufferBase(GL_UNIFORM_BUFFER, UNIFORM_BUFFER_LIGHT, s_uboLight);
 }
 
-void uploadObjectUniforms()
+void uploadObjectUniforms(const ObjectData& data)
 {
-
+	/** Töltsük fel a fényforrás. */
+	glBindBuffer(GL_UNIFORM_BUFFER, s_uboObject);
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(ObjectData), &data, GL_STREAM_DRAW);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+	glBindBufferBase(GL_UNIFORM_BUFFER, UNIFORM_BUFFER_OBJECT, s_uboObject);
 }
 
-void renderBasePass()
+void renderSkybox()
 {
 	glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
+	glCullFace(GL_FRONT);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+
+	uploadObjectUniforms(s_skyboxData);
+
+	glUseProgram(s_programSkybox);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, s_textureSkybox);
+
+	glBindVertexArray(s_vao);
+	glDrawElements(GL_TRIANGLES, s_indices.size(), GL_UNSIGNED_INT, NULL);
+	glBindVertexArray(0);
+}
+
+void renderObjects()
+{
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
 	glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-    
-	/** Csatoljuk a framebuffer objektumot és beállítjuk a viewportot a teljes bufferre. */
-	glBindFramebuffer(GL_FRAMEBUFFER, s_fbo);
-	glViewport(0, 0, s_bufferWidth, s_bufferHeight);
+	glDepthFunc(GL_LESS);
 
-	glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
-    
-	glClearDepth(1.0f);
+	glDepthMask(GL_TRUE);
+	
+	uploadObjectUniforms(s_sponzaData);
 
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    
 	glUseProgram(s_program);
-
-	uploadCameraUniforms();
-	uploadLightUniforms();
 
 	for (const auto& submesh : s_sponza.m_submeshes)
 	{
@@ -850,11 +929,34 @@ void renderBasePass()
 	glBindVertexArray(0);
 }
 
+void renderBasePass()
+{    
+	/** Csatoljuk a framebuffer objektumot és beállítjuk a viewportot a teljes bufferre. */
+	glBindFramebuffer(GL_FRAMEBUFFER, s_fbo);
+	glViewport(0, 0, s_bufferWidth, s_bufferHeight);
+
+	glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+	glClearDepth(1.0f);
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    
+	uploadCameraUniforms();
+	uploadLightUniforms();
+
+	renderSkybox();
+
+	renderObjects();
+}
+
 void renderCompositePass()
 {
 	/** Csatoljuk a default framebuffert és állítsuk be a viewportot. */
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, s_width, s_height);
+
+	glDisable(GL_CULL_FACE);
+	glDepthMask(GL_TRUE);
+	glDisable(GL_DEPTH_TEST);
 	
 	/** Tisztítsuk ki. */
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -955,8 +1057,9 @@ void mouseMoved(GLFWwindow* window, GLdouble x, GLdouble y)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//                     MÉN
+//                     MAIN
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 int main(int argc,char** argv)
 {
 	if (!glfwInit())
