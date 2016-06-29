@@ -5,6 +5,8 @@
 #define UNIFORM_BUFFER_LIGHT  1
 #define UNIFORM_BUFFER_OBJECT 2
 
+layout (location = 0) uniform vec3 vSkyboxTintColor;
+
 /** Kamera uniform pufferei. */
 layout (std140, binding = UNIFORM_BUFFER_CAMERA) uniform CameraData
 {
@@ -41,5 +43,5 @@ void main()
     //textureColor = normalize(abs(uv));
    
     /** A fragment színe az intenzitás és a csúcs színeként áll elõ. */
-    outColor = vec4(textureColor, 1);
+    outColor = vec4(textureColor*vSkyboxTintColor, 1);
 }

@@ -55,7 +55,7 @@ static GLdouble s_mouseX = -1.0, s_mouseY = -1.0;
 //                     KAMERA PARAMÉTEREK
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static GLfloat s_camMovementSpeed = 8.0f;
+static GLfloat s_camMovementSpeed = 20.0f;
 static GLfloat s_camRotationSpeed = glm::radians(0.1f);
 
 static GLfloat s_pitch = 0.0f;
@@ -89,6 +89,10 @@ static std::string skyboxImages[] =
 	"back.jpg",
 	"front.jpg" 
 };
+
+GLfloat dayNight = 1.0f;
+glm::vec3 s_skyboxTintColor = glm::vec3(1.0f)*dayNight;
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                     
@@ -164,8 +168,13 @@ struct DirectionalLightData
 
 struct PointLightData
 {
-	glm::vec4 m_center;
-	glm::vec4 m_lightColor;
+	glm::vec3 m_center;
+	float _pad1;
+	glm::vec3 m_diffuseColor;
+	float _pad2;
+	glm::vec3 m_specularColor;
+	float _pad3;
+	glm::vec3 m_ambientColor;
 	GLfloat m_radius;
 } s_pointLight;
 
@@ -582,9 +591,11 @@ void initLightSources()
 	s_directionalLight.m_lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
     
     /** Pontszerû fényforrás helye, sugara, színe és csillapodásai. */
-	s_pointLight.m_center = glm::vec4(0.0f, 2000.0f, 0.0f, 0.0f);
-	s_pointLight.m_lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
-	s_pointLight.m_radius = 4000.0f;
+	s_pointLight.m_center = glm::vec3(0.0f, 2000.0f, 0.0f);
+	s_pointLight.m_radius = 1000.0f;
+	s_pointLight.m_ambientColor = glm::vec3(0.1, 0.1, 0.1);
+	s_pointLight.m_diffuseColor = glm::vec3(1, 1, 1)*0.6f;
+	s_pointLight.m_specularColor = glm::vec3(1, 1, 1)*0.1f;
 }
 
 void initMatrices()
@@ -679,9 +690,7 @@ void initBuffers()
 	glEnableVertexAttribArray(VERTEX_ATTRIB_POS);
     /** Újra csatoljuk a VBO-nkat. Itt már lényeges, hogy az ARRAY_BUFFER-t használjuk, ugyanis a következõ hívás
         az ehhez a csatolóponthoz kötött VBO-t jegyzi meg és használja az adatok kinyeréséhez. 
-        Megjegyzés: természetesen ugyanezt az eredményt értük volna el, ha a 35. sorban nem választjuk le a puffert,
-                    és egyszerûen kihagyjuk ezt a hívást (laboron is ezt csináltuk), viszont a mûködést demonstrálandó
-                    ennél maradtam. */
+    */
 	glBindBuffer(GL_ARRAY_BUFFER, s_vboVertex);
     /** Megadjuk a pozíció attribútum szerkezetét. Egy 3 komponensû, lebegõpontos értékû, nem normalizálandó attribútum,
         mely elemei a pufferben folytonosan helyezkednek el (elsõ 0), és az elsõ elem a 0. bájtoffszeten kezdõdik (második 0). 
@@ -894,6 +903,8 @@ void renderSkybox()
 
 	glUseProgram(s_programSkybox);
 
+	glUniform3f(0, s_skyboxTintColor.x, s_skyboxTintColor.y, s_skyboxTintColor.z);
+
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_CUBE_MAP, s_textureSkybox);
 
@@ -1000,16 +1011,40 @@ void keyPressed(GLFWwindow* window, GLint key, GLint scanCode, GLint action, GLi
 		/** Az elõre mozgáshoz a forward vektort tudjuk felhasználni. */
 		case GLFW_KEY_W:
 			s_cameraData.m_eye += s_cameraData.m_forward * s_camMovementSpeed;
+			s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
 			break;
 		
 		/** Hátra a forward vektor negáltját használjuk. */
-		case GLFW_KEY_S: s_cameraData.m_eye -= s_cameraData.m_forward * s_camMovementSpeed; break;
+		case GLFW_KEY_S: s_cameraData.m_eye -= s_cameraData.m_forward * s_camMovementSpeed;
+		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
+		break;
 		
 		/** Balra a right vektor negáltját... */
-		case GLFW_KEY_A: s_cameraData.m_eye -= s_cameraData.m_right * s_camMovementSpeed; break;
+		case GLFW_KEY_A: s_cameraData.m_eye -= s_cameraData.m_right * s_camMovementSpeed;
+		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
+		break;
 		
 		/** ...jobbra pedig magát a right vektort tudjuk felhasználni. */
-		case GLFW_KEY_D: s_cameraData.m_eye += s_cameraData.m_right * s_camMovementSpeed; break;
+		case GLFW_KEY_D: s_cameraData.m_eye += s_cameraData.m_right * s_camMovementSpeed;
+		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
+		break;
+
+		case GLFW_KEY_N: 
+			if (dayNight >= 0.0f)
+			{
+				dayNight-=0.03f;
+				s_skyboxTintColor = glm::vec3(1.0f)*dayNight;
+			}
+			break;
+
+		case GLFW_KEY_M: 
+			if (dayNight <= 1.0f)
+			{
+				dayNight += 0.03f;
+				s_skyboxTintColor = glm::vec3(1.0f)*dayNight;
+			}
+			
+			break;
 		
 		/** Kilépés escape-re. */
 		case GLFW_KEY_ESCAPE:
@@ -1051,6 +1086,8 @@ void mouseMoved(GLFWwindow* window, GLdouble x, GLdouble y)
 	
 	/** Ha történt módosítás, ha nem, állítsuk elõ újra az MVP mátrixokat. */
 	initMatrices();
+
+	s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
 	
 	/** Erre pedig a GLFW-nek van szüksége. */
 	glfwPollEvents();

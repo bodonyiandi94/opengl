@@ -32,8 +32,10 @@ struct DirectionalLightData
 /** Egy pontszerű fényforráshoz tartozó adatok. */
 struct PointLightData
 {
-    vec4 vLightPosWS;
-    vec4 vLightColor;
+    vec3 vLightPosWS;
+    vec3 vDiffuseColor;
+    vec3 vSpecularColor;
+    vec3 vAmbientColor;
     float fRadius;
 };
 
@@ -96,9 +98,14 @@ vec3 calcPointLight(PointLightData lightData, vec3 vPosWS, vec3 vNormalWS)
     
     /** A csillanás mértéke a visszavert, illetve a kamerába mutató vektor skalárszorzatakén áll elő. */
     float specularIntensity = pow(max(dot(toEye, reflected), 0.0), 32);
+	
+	vec3 returnColor = 
+		diffuseIntensity *lightData. vDiffuseColor + 
+		specularIntensity * lightData.vSpecularColor + 
+		lightData.vAmbientColor;
    
     /** A végeredmény a fény színének és az együtthatóknak a szorzata, csillapítva. */
-    return (lightData.vLightColor.rgb * (diffuseIntensity + specularIntensity)) * attenuation;
+    return returnColor * attenuation;
 }
 
 void main()
