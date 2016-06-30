@@ -591,11 +591,11 @@ void initLightSources()
 	s_directionalLight.m_lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
     
     /** Pontszerû fényforrás helye, sugara, színe és csillapodásai. */
-	s_pointLight.m_center = glm::vec3(0.0f, 2000.0f, 0.0f);
+	s_pointLight.m_center = glm::vec3(0.0f, 1000.0f, 0.0f);
 	s_pointLight.m_radius = 1000.0f;
-	s_pointLight.m_ambientColor = glm::vec3(0.1, 0.1, 0.1);
-	s_pointLight.m_diffuseColor = glm::vec3(1, 1, 1)*0.6f;
-	s_pointLight.m_specularColor = glm::vec3(1, 1, 1)*0.1f;
+	s_pointLight.m_ambientColor = glm::vec3(1,1,1)*0.15f;
+	s_pointLight.m_diffuseColor = glm::vec3(1, 1, 1);
+	s_pointLight.m_specularColor = glm::vec3(1, 1, 1);
 }
 
 void initMatrices()
@@ -1011,22 +1011,22 @@ void keyPressed(GLFWwindow* window, GLint key, GLint scanCode, GLint action, GLi
 		/** Az elõre mozgáshoz a forward vektort tudjuk felhasználni. */
 		case GLFW_KEY_W:
 			s_cameraData.m_eye += s_cameraData.m_forward * s_camMovementSpeed;
-			s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
+			s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*1000.0f);
 			break;
 		
 		/** Hátra a forward vektor negáltját használjuk. */
 		case GLFW_KEY_S: s_cameraData.m_eye -= s_cameraData.m_forward * s_camMovementSpeed;
-		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
+		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*1000.0f);
 		break;
 		
 		/** Balra a right vektor negáltját... */
 		case GLFW_KEY_A: s_cameraData.m_eye -= s_cameraData.m_right * s_camMovementSpeed;
-		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
+		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*1000.0f);
 		break;
 		
 		/** ...jobbra pedig magát a right vektort tudjuk felhasználni. */
 		case GLFW_KEY_D: s_cameraData.m_eye += s_cameraData.m_right * s_camMovementSpeed;
-		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
+		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*1000.0f);
 		break;
 
 		case GLFW_KEY_N: 
@@ -1087,7 +1087,7 @@ void mouseMoved(GLFWwindow* window, GLdouble x, GLdouble y)
 	/** Ha történt módosítás, ha nem, állítsuk elõ újra az MVP mátrixokat. */
 	initMatrices();
 
-	s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*200.0f);
+	s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*1000.0f);
 	
 	/** Erre pedig a GLFW-nek van szüksége. */
 	glfwPollEvents();

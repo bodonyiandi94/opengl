@@ -35,10 +35,11 @@ out vec3 vPosVS;
 
 void main()
 {    
-    /** Adjuk tovább a világkoordinátabeli koordinátákat. */
-    vPosVS = vec3(sObjectData.mModel * vec4(vPos, 1));
+	vPosVS = vPos;
+	
+    vec3 vPosWS = vec3(sObjectData.mModel * vec4(vPosVS, 1));
     
-	vec3 vPosCS = vec3(sCameraData.mView * vec4(vPosVS, 0));
+	vec3 vPosCS = vec3(sCameraData.mView * vec4(vPosWS, 0));
 	
     /** Számoljuk ki a vertex pozícióját. */
     gl_Position = sCameraData.mProjection * vec4(vPosCS, 1);

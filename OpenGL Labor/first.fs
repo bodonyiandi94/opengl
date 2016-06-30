@@ -101,8 +101,8 @@ vec3 calcPointLight(PointLightData lightData, vec3 vPosWS, vec3 vNormalWS)
 	
 	vec3 returnColor = 
 		diffuseIntensity *lightData. vDiffuseColor + 
-		specularIntensity * lightData.vSpecularColor + 
-		lightData.vAmbientColor;
+		specularIntensity * lightData.vSpecularColor;
+		//lightData.vAmbientColor;
    
     /** A végeredmény a fény színének és az együtthatóknak a szorzata, csillapítva. */
     return returnColor * attenuation;
@@ -116,7 +116,31 @@ void main()
     
     /** Számoljuk ki a megvilágítás mértékét. */
     vec3 vLightColor = calcPointLight(sLightData.sData, vPosVS, vNormalWS);
+	
+	vLightColor = vLightColor + sLightData.sData.vAmbientColor;
     
+	//////////////////////////////////////////////////////////////////////////
+	
+	/** Számoljuk ki a fény intenzitását. */
+    //float fDiffuseIntensity = (dot(vNormalWS, vLightDirWS) + 1.0f)/2.0f;
+
+    /** A kamerába mutató vektort. */
+    //vec3 toEye = normalize(vEye - vPosVS);
+    
+    /** A fényfelé mutató vektor tükrözöttje a normáltra. */
+    //vec3 reflected = normalize(reflect(-vLightDirWS, vNormalWS));
+
+	/** A csillanás mértéke a visszavert, illetve a kamerába mutató vektor skalárszorzatakén áll elő. */
+    //float fSpecularIntensity = pow((dot(toEye, reflected) + 1.0f) / 2.0f, 32);
+
+	//vec3 lightColor = 
+		//fDiffuseIntensity * lightData.vDiffuseColor + 
+		//fSpecularIntensity * lightData.vSpecularColor + 
+		//sLightData.sData.vAmbientColor;
+	
+	//////////////////////////////////////////////////////////////////////////
+	
+	
     /** Vegyünk mintát a textúránkból. */
     vec3 textureColor = texture2D(sTexture, vUVVS).rgb;
    
