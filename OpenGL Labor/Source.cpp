@@ -8,6 +8,7 @@
 #include "GL/glm/gtc/matrix_inverse.hpp"
 #include "GL/glm/gtx/transform.hpp"
 #include "GL/glm/gtc/type_ptr.hpp"
+#include "GL/glm/gtc/random.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -93,6 +94,29 @@ static std::string skyboxImages[] =
 GLfloat dayNight = 1.0f;
 glm::vec3 s_skyboxTintColor = glm::vec3(1.0f)*dayNight;
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//                     KÖZÉPSÕ TÉGLALAP
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct SphereData
+{
+	glm::vec3 center;
+	GLfloat radius;
+	glm::mat4 s_sphereViewProjection;
+
+	glm::vec3 velocity;
+	GLfloat mass;
+	int lockCollision;
+};
+
+static GLuint s_textureMiddle = 0;
+std::vector<SphereData> s_sphereMovementData;
+static GLuint s_sphereVboVertex = 0, s_sphereVboUV = 0, s_sphereVboNormal, s_sphereIbo = 0, s_sphereVao = 0;
+
+std::vector<glm::vec3> s_spherePositions;
+std::vector<glm::vec3> s_sphereNormals;
+std::vector<glm::vec2> s_sphereUVs;
+std::vector<GLuint> s_sphereIndices;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                     
@@ -158,7 +182,7 @@ struct ObjectData
 {
 	glm::mat4 m_model;
 	glm::mat4 m_normal;
-}s_skyboxData, s_sponzaData;
+}s_skyboxData, s_sponzaData, s_wallData, s_sphereData[3];
 
 struct DirectionalLightData
 {
@@ -580,6 +604,210 @@ void unloadMesh(Mesh& mesh)
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+std::pair<glm::vec3, glm::vec3> getOrthogonalComponents(glm::vec3 a, glm::vec3 v)
+{
+	glm::vec3 m = (glm::dot(a, v) / glm::dot(v, v))*v;
+	glm::vec3 u = a - m;
+
+	return std::make_pair(m, u);
+}
+
+glm::vec3 mirrorVector(const glm::vec3 a, const glm::vec3 v)
+{
+	const auto& orthoComponents = getOrthogonalComponents(a, v);
+	return 2.0f * orthoComponents.first - a;
+}
+
+bool checkSphereSphereCollision(const SphereData& sd1, const SphereData& sd2)
+{
+	if (glm::distance(sd1.center, sd2.center) > sd1.radius + sd2.radius)
+		return false;
+
+	glm::vec3 w = sd2.center - sd1.center;
+
+	GLfloat angle = glm::dot(w, sd1.velocity) / (glm::length(sd1.velocity)*glm::length(w));
+	return angle > 0;
+}
+
+std::vector<glm::vec3> wallNormals =
+{
+	//elsõ
+	glm::vec3(0, 0, 1),
+	//jobb
+	glm::vec3(1, 0, 0),
+	//hátsó
+	glm::vec3(0, 0, -1),
+	//bal
+	glm::vec3(-1, 0, 0),
+	//alsó
+	glm::vec3(0, -1, 0),
+	//felsõ
+	glm::vec3(0, 1, 0),
+};
+
+glm::vec3 getWallNormal(int index)
+{
+	return wallNormals[index];
+}
+
+std::vector<glm::vec3> wallPoints =
+{
+	//elsõ
+	glm::vec3(0.5, 0.5, 0.5),
+	//jobb
+	glm::vec3(0.5, 0.5, 0.5),
+	//hátsó
+	glm::vec3(0.5, 0.5, -0.5),
+	//bal
+	glm::vec3(-0.5, 0.5, 0.5),
+	//alsó
+	glm::vec3(0.5, -0.5, 0.5),
+	//felsõ
+	glm::vec3(0.5, 0.5, 0.5),
+};
+
+glm::vec3 gelWallPoint(int index)
+{
+	return glm::vec3(s_wallData.m_model * glm::vec4(wallPoints[index], 1));
+}
+
+bool checkSphereWallCollision(const SphereData& sd, int index)
+{
+	glm::vec3 wallNormal = getWallNormal(index);
+	glm::vec3 sphereCenter = sd.center;
+	glm::vec3 wallPoint = gelWallPoint(index);
+
+	GLfloat Ax = wallNormal.x * sphereCenter.x;
+	GLfloat By = wallNormal.y * sphereCenter.y;
+	GLfloat Cz = wallNormal.z * sphereCenter.z;
+	GLfloat	D = -wallNormal.x*wallPoint.x - wallNormal.y*wallPoint.y - wallNormal.z*wallPoint.z;
+
+	if (glm::abs(Ax + By + Cz + D) > sd.radius)
+		return false;
+
+	GLfloat angle = glm::dot(getWallNormal(index), sd.velocity) / glm::length(sd.velocity);
+	return angle > 0;
+}
+
+glm::vec3 resolveWallCollision(const SphereData& sd, int index)
+{
+	return mirrorVector(-sd.velocity, getWallNormal(index));
+}
+
+std::pair<glm::vec3, glm::vec3> resolveCollision(const SphereData& sd1, const SphereData& sd2)
+{
+	glm::vec3 w = sd2.center - sd1.center;
+	GLfloat r = sd1.mass / sd2.mass;
+
+	glm::vec3 s1 = sd1.velocity;
+	glm::vec3 s2 = sd2.velocity;
+	glm::vec3 m1 = s1 - s2;
+	const auto& orthoComponent = getOrthogonalComponents(m1, w);
+
+	glm::vec3 m1_vesszo = orthoComponent.first;
+	glm::vec3 u1 = orthoComponent.second;
+
+	glm::vec3 m2 = ((r - 1.0f) / (r + 1.0f))*m1_vesszo + u1;
+	glm::vec3 a2 = (2 * r*m1_vesszo) / (r + 1);
+
+	return std::make_pair(m2 + s2, a2 + s2);
+}
+
+GLfloat getSphereRadius()
+{
+	return glm::linearRand(0.4f, 0.7f);
+}
+
+glm::vec3 getSphereVelocity()
+{
+	return 12.0f * glm::vec3(
+		glm::linearRand(-0.5f, 0.5f),
+		glm::linearRand(-0.5f, 0.5f),
+		glm::linearRand(-0.5f, 0.5f));
+}
+
+GLfloat getSphereMass()
+{
+	return glm::linearRand(8.0, 12.0);
+}
+
+void initSphereCenters()
+{
+	SphereData sphere;
+
+	sphere.center = glm::vec3(0.0f, 5.0f, 0.0f);
+	sphere.radius = getSphereRadius();
+	sphere.velocity = glm::vec3(-5.0f, -5.0f, -5.0f);
+	sphere.mass = getSphereMass();
+	s_sphereMovementData.push_back(sphere);
+
+	sphere.center = glm::vec3(5.0f, 5.0f, 5.0f);
+	sphere.radius = getSphereRadius();
+	sphere.velocity = glm::vec3(-5.0f, -5.0f, -5.0f);
+	sphere.mass = getSphereMass();
+	s_sphereMovementData.push_back(sphere);
+
+	sphere.center = glm::vec3(7.0f, 5.0f, 5.0f);
+	sphere.radius = getSphereRadius();
+	sphere.velocity = glm::vec3(-5.0f, -5.0f, -5.0f);
+	sphere.mass = getSphereMass();
+	s_sphereMovementData.push_back(sphere);
+}
+
+glm::vec3 GenerateVertex(const float& phi, const float& theta)
+{
+	return glm::vec3(
+		cos(theta)*sin(phi),
+		cos(phi),
+		-sin(theta)*sin(phi)
+		);
+}
+
+void GenSphereCoordinates(unsigned detail)
+{
+	float step = glm::pi<float>() / detail;
+
+	for (int i = 0; i <= detail; i++)
+	{
+		float phi = i*step;
+
+		for (int j = 0; j <= detail * 2; j++)
+		{
+			float theta = j*step;
+
+			s_spherePositions.push_back(GenerateVertex(phi, theta));
+			s_sphereNormals.push_back(glm::normalize(GenerateVertex(phi, theta)));
+			s_sphereUVs.push_back(glm::vec2(j * (1.0 / (detail * 2)), 1.0 - i * (1.0 / detail)));
+		}
+	}
+}
+
+GLuint genIndex(unsigned detail, int i, int j)
+{
+	return i * (detail * 2 + 1) + j;
+}
+
+void genSphereIndices(unsigned detail)
+{
+	for (int i = 0; i < detail; i++)
+	{
+		for (int j = 0; j<detail * 2; j++)
+		{
+			s_sphereIndices.push_back(genIndex(detail, i, j));
+			s_sphereIndices.push_back(genIndex(detail, i + 1, j));
+			s_sphereIndices.push_back(genIndex(detail, i + 1, j + 1));
+
+			s_sphereIndices.push_back(genIndex(detail, i, j));
+			s_sphereIndices.push_back(genIndex(detail, i + 1, j + 1));
+			s_sphereIndices.push_back(genIndex(detail, i, j + 1));
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                     JELENET INICIALIZÁCIÓ
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -622,6 +850,18 @@ void initMatrices()
 
 	s_sponzaData.m_model = glm::scale(glm::vec3(2.0f));
 	s_sponzaData.m_normal = glm::inverseTranspose(s_sponzaData.m_model);
+
+	s_wallData.m_model = glm::translate(glm::vec3(0,50,0)) * glm::scale(glm::vec3(50.0f));
+	s_wallData.m_normal = glm::inverseTranspose(s_wallData.m_model);
+
+	s_sphereData[0].m_model = glm::translate(glm::vec3(0,50,0)) * glm::scale(glm::vec3(100.0f));
+	s_sphereData[0].m_normal = glm::inverseTranspose(s_sphereData[0].m_model);
+
+	s_sphereData[1].m_model = glm::translate(glm::vec3(0, 30, 0)) * glm::scale(glm::vec3(100.0f));
+	s_sphereData[1].m_normal = glm::inverseTranspose(s_sphereData[1].m_model);
+
+	s_sphereData[2].m_model = glm::translate(glm::vec3(0, 10, 0)) * glm::scale(glm::vec3(100.0f));
+	s_sphereData[2].m_normal = glm::inverseTranspose(s_sphereData[2].m_model);
 }
 
 void initGeometry()
@@ -643,6 +883,9 @@ void initGeometry()
 	for (int i=0;i<6;i++)
 		for (size_t j=0;j<s_faceIndices.size();++j)
 			s_indices.push_back(s_faceIndices[j] + i*4);
+
+	GenSphereCoordinates(20);
+	genSphereIndices(20);
 }
 
 void initBuffers()
@@ -651,6 +894,12 @@ void initBuffers()
 	glGenBuffers(1, &s_uboLight);
 	glGenBuffers(1, &s_uboCamera);
 	glGenBuffers(1, &s_uboObject);
+	
+	glGenBuffers(1, &s_sphereVboVertex);
+	glGenBuffers(1, &s_sphereVboUV);
+	glGenBuffers(1, &s_sphereVboNormal);
+	glGenBuffers(1, &s_sphereIbo);
+	glGenVertexArrays(1, &s_sphereVao);
 
 	/** Hozzuk létre a szükséges VAO és VBO-kat. */
 	glGenBuffers(1, &s_vboVertex);
@@ -659,61 +908,78 @@ void initBuffers()
 	glGenBuffers(1, &s_ibo);
 	glGenVertexArrays(1, &s_vao);
     
-    /** Csatoljuk a puffert az 'ARRAY_BUFFER' nevesített csatolópontba. Ezen a ponton igazából mindegy, hova csatoljuk,
-        a lényeg, hogy mindhárom hívásban ugyanazt írjuk. Azért használjuk mégis az ARRAY_BUFFER-t, mivel egy másik
-        csatolóponttal alkotott kötés megtörése nem kívánatos eredményeket okozhat. */
 	glBindBuffer(GL_ARRAY_BUFFER, s_vboVertex);
-    /** Töltsük fel az elõbb felcsatolt puffert. A második paraméter (méret) bájtokat vár. A STATIC_DRAW azt jelzi, 
-        hogy valószínûleg nem fogjuk (csak ritkán) módosítani a puffer tartalmát. */
 	glBufferData(GL_ARRAY_BUFFER, s_positions.size() * sizeof(glm::vec3), s_positions.data(), GL_STATIC_DRAW);
     /** Lecsatoljuk a puffert. */
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    /** Ugyanezt megtesszük a színeket tartalmazó pufferrel is. */
 	glBindBuffer(GL_ARRAY_BUFFER, s_vboUV);
 	glBufferData(GL_ARRAY_BUFFER, s_uvs.size() * sizeof(glm::vec2), s_uvs.data(), GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
     
-    /** Majd a normálvektorokat tartalmazó pufferrel is. */
 	glBindBuffer(GL_ARRAY_BUFFER, s_vboNormal);
 	glBufferData(GL_ARRAY_BUFFER, s_normals.size() * sizeof(glm::vec3), s_normals.data(), GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    /** Töltsük fel az index puffert az indexekkel. */
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_ibo);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, s_indices.size() * sizeof(GLuint), s_indices.data(), GL_STATIC_DRAW);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-    /** Csatoljuk a VAO-t, hogy konfigurálni tudjuk. */
-	glBindVertexArray(s_vao);
-    /** Engedélyezzük a pozíció attribútumot. */
-	glEnableVertexAttribArray(VERTEX_ATTRIB_POS);
-    /** Újra csatoljuk a VBO-nkat. Itt már lényeges, hogy az ARRAY_BUFFER-t használjuk, ugyanis a következõ hívás
-        az ehhez a csatolóponthoz kötött VBO-t jegyzi meg és használja az adatok kinyeréséhez. 
-    */
-	glBindBuffer(GL_ARRAY_BUFFER, s_vboVertex);
-    /** Megadjuk a pozíció attribútum szerkezetét. Egy 3 komponensû, lebegõpontos értékû, nem normalizálandó attribútum,
-        mely elemei a pufferben folytonosan helyezkednek el (elsõ 0), és az elsõ elem a 0. bájtoffszeten kezdõdik (második 0). 
-        A puffer mindig a jelenleg az ARRAY_BUFFER-hez csatolt puffer lesz (ha van, azaz nem 0), melyet megjegyez, így a 
-        késõbbiekben ezt már nem szükséges csatolni a rajzoláshoz. */
-	glVertexAttribPointer(VERTEX_ATTRIB_POS, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    /** Leválasztjuk a pufferünket, nehogy véletlenül módosítsuk. */
+	/////////////////////////////////////////////////////////////////////////////////////////////////////
+	//Sphere buffers
+	glBindBuffer(GL_ARRAY_BUFFER, s_sphereVboVertex);
+	glBufferData(GL_ARRAY_BUFFER, s_spherePositions.size() * sizeof(glm::vec3), s_spherePositions.data(), GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-    /** Konfiguráljuk a szín attribútumot, a fentihez hasonló módon. */
+
+	glBindBuffer(GL_ARRAY_BUFFER, s_sphereVboUV);
+	glBufferData(GL_ARRAY_BUFFER, s_sphereUVs.size() * sizeof(glm::vec2), s_sphereUVs.data(), GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, s_sphereVboNormal);
+	glBufferData(GL_ARRAY_BUFFER, s_sphereNormals.size() * sizeof(glm::vec3), s_sphereNormals.data(), GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	//Sphere indices
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_sphereIbo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, s_sphereIndices.size() * sizeof(GLuint), s_sphereIndices.data(), GL_STATIC_DRAW);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+	glBindVertexArray(s_vao);
+	glEnableVertexAttribArray(VERTEX_ATTRIB_POS);
+	glBindBuffer(GL_ARRAY_BUFFER, s_vboVertex);
+	glVertexAttribPointer(VERTEX_ATTRIB_POS, 3, GL_FLOAT, GL_FALSE, 0, 0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
 	glEnableVertexAttribArray(VERTEX_ATTRIB_UV);
 	glBindBuffer(GL_ARRAY_BUFFER, s_vboUV);
 	glVertexAttribPointer(VERTEX_ATTRIB_UV, 2, GL_FLOAT, GL_FALSE, 0, 0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-    /** Majd konfiguráljuk a normálvektor attribútumot. */
+
 	glEnableVertexAttribArray(VERTEX_ATTRIB_NORMAL);
 	glBindBuffer(GL_ARRAY_BUFFER, s_vboNormal);
 	glVertexAttribPointer(VERTEX_ATTRIB_NORMAL, 3, GL_FLOAT, GL_FALSE, 0, 0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    /** Csatoljuk az index puffert. Az attribútomokkal ellentétben más teendõnk nincs a pufferrel,
-        az indexek olvasásának módját (típus, darabok, stb.) majd rajzoláskor kell megadnunk.*/
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_ibo);
-    /** Végeztünk, leválaszthatjuk a VAO-t. */
+
+	glBindVertexArray(0);
+
+	//Sphere VAO
+	glBindVertexArray(s_sphereVao);
+	glEnableVertexAttribArray(VERTEX_ATTRIB_POS);
+	glBindBuffer(GL_ARRAY_BUFFER, s_sphereVboVertex);
+	glVertexAttribPointer(VERTEX_ATTRIB_POS, 3, GL_FLOAT, GL_FALSE, 0, 0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glEnableVertexAttribArray(VERTEX_ATTRIB_UV);
+	glBindBuffer(GL_ARRAY_BUFFER, s_sphereVboUV);
+	glVertexAttribPointer(VERTEX_ATTRIB_UV, 2, GL_FLOAT, GL_FALSE, 0, 0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glEnableVertexAttribArray(VERTEX_ATTRIB_NORMAL);
+	glBindBuffer(GL_ARRAY_BUFFER, s_sphereVboNormal);
+	glVertexAttribPointer(VERTEX_ATTRIB_NORMAL, 3, GL_FLOAT, GL_FALSE, 0, 0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_sphereIbo);
 	glBindVertexArray(0);
 
 	/** Hozzuk létre a négyzethez tartozó puffereket.. */
@@ -802,27 +1068,6 @@ void initShaders()
 	s_programSkybox = loadProgram("skybox");
 }
 
-void initScene()
-{
-	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-
-	loadCubeMap(s_textureSkybox, skyboxImages);
-
-	loadMesh(s_sponza, "Sponza", "sponza.obj");
-
-	initLightSources();
-
- 	initMatrices();
-	
- 	initGeometry();
-	
- 	initBuffers();
-	
- 	initFrameBuffer();
-	
- 	initShaders();
-}
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                     JELENET TÖRLÉS
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -858,6 +1103,12 @@ void cleanUpScene()
 	glDeleteBuffers(1, &s_uboLight);
 	glDeleteBuffers(1, &s_uboCamera);
 	glDeleteBuffers(1, &s_uboObject);
+
+	glDeleteVertexArrays(1, &s_sphereVao);
+	glDeleteBuffers(1, &s_sphereIbo);
+	glDeleteBuffers(1, &s_sphereVboVertex);
+	glDeleteBuffers(1, &s_sphereVboUV);
+	glDeleteBuffers(1, &s_sphereVboNormal);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -890,6 +1141,31 @@ void uploadObjectUniforms(const ObjectData& data)
 	glBufferData(GL_UNIFORM_BUFFER, sizeof(ObjectData), &data, GL_STREAM_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 	glBindBufferBase(GL_UNIFORM_BUFFER, UNIFORM_BUFFER_OBJECT, s_uboObject);
+}
+
+void initScene()
+{
+	initSphereCenters();
+
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
+	loadCubeMap(s_textureSkybox, skyboxImages);
+
+	loadMesh(s_sponza, "Sponza", "sponza.obj");
+
+	loadTexture(s_textureMiddle, "bricks.jpg");
+
+	initLightSources();
+
+	initMatrices();
+
+	initGeometry();
+
+	initBuffers();
+
+	initFrameBuffer();
+
+	initShaders();
 }
 
 void renderSkybox()
@@ -940,6 +1216,42 @@ void renderObjects()
 	glBindVertexArray(0);
 }
 
+void renderMidLightsources()
+{
+	/*glEnable(GL_CULL_FACE);
+	glCullFace(GL_FRONT);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);*/
+
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_FRONT);
+	glEnable(GL_DEPTH_TEST);
+	//glDepthFunc(GL_LESS);
+
+	glDepthMask(GL_TRUE);
+
+	glUseProgram(s_program);
+
+	glBindVertexArray(s_sphereVao);
+	for (const auto& sphere : s_sphereData)
+	{
+		uploadObjectUniforms(sphere);
+
+		//Draw the sphere
+		glDrawElements(GL_TRIANGLES, s_sphereIndices.size(), GL_UNSIGNED_INT, NULL);
+	}
+	glBindVertexArray(0);
+
+	uploadObjectUniforms(s_wallData);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, s_textureMiddle);
+
+	glBindVertexArray(s_vao);
+	glDrawElements(GL_TRIANGLES, s_indices.size(), GL_UNSIGNED_INT, NULL);
+	glBindVertexArray(0);
+}
+
 void renderBasePass()
 {    
 	/** Csatoljuk a framebuffer objektumot és beállítjuk a viewportot a teljes bufferre. */
@@ -957,6 +1269,8 @@ void renderBasePass()
 	renderSkybox();
 
 	renderObjects();
+
+	renderMidLightsources();
 }
 
 void renderCompositePass()
@@ -1028,6 +1342,10 @@ void keyPressed(GLFWwindow* window, GLint key, GLint scanCode, GLint action, GLi
 		case GLFW_KEY_D: s_cameraData.m_eye += s_cameraData.m_right * s_camMovementSpeed;
 		s_pointLight.m_center = glm::vec3(s_cameraData.m_eye + s_cameraData.m_forward*1000.0f);
 		break;
+
+		case GLFW_KEY_ENTER:
+			std::cout << s_cameraData.m_eye.x << ", " << s_cameraData.m_eye.y << ", " << s_cameraData.m_eye.z << std::endl;
+			break;
 
 		case GLFW_KEY_N: 
 			if (dayNight >= 0.0f)
